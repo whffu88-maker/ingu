@@ -3,39 +3,53 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>동네 인구 검색</title>
+    <title>동네 인구 검색 & 피라미드</title>
+    <!-- Plotly 라이브러리 로드 -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <style>
-        body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; color: #333; }
-        input[type="text"] { width: 70%; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px; }
-        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: #007BFF; color: white; border: none; border-radius: 4px; }
+        body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; color: #333; }
+        h1 { text-align: center; }
+        input[type="text"] { width: 75%; padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { width: 22%; padding: 12px; font-size: 16px; cursor: pointer; background-color: #007BFF; color: white; border: none; border-radius: 4px; box-sizing: border-box; float: right; }
         button:hover { background-color: #0056b3; }
-        ul { list-style-type: none; padding: 0; margin-top: 10px; }
-        li { padding: 10px; border: 1px solid #ccc; margin-top: -1px; cursor: pointer; background-color: #fff; }
+        .search-wrap { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        ul { list-style-type: none; padding: 0; margin-top: 0; }
+        li { padding: 12px; border: 1px solid #ccc; border-top: none; cursor: pointer; background-color: #fff; }
         li:hover { background-color: #f0f0f0; }
-        #result { margin-top: 20px; padding: 20px; border: 1px solid #007BFF; border-radius: 5px; background-color: #e9f5ff; display: none; }
-        .loading { color: #666; font-style: italic; }
+        #result { margin-top: 30px; padding: 20px; border: 1px solid #007BFF; border-radius: 5px; background-color: #e9f5ff; display: none; }
+        .summary-info { font-size: 1.1em; display: flex; gap: 20px; justify-content: center; margin-bottom: 20px; }
+        .summary-info p { margin: 0; }
+        .loading { color: #666; font-style: italic; text-align: center; margin-top: 50px; }
+        #pyramid-chart { width: 100%; height: 600px; }
     </style>
 </head>
 <body>
     <h1>우리동네 인구 검색</h1>
-    <p id="status" class="loading">행정안전부 데이터를 불러오는 중입니다...</p>
+    <p id="status" class="loading">행정안전부 데이터를 불러오는 중입니다...<br>(잠시만 기다려주세요)</p>
     
     <div id="search-container" style="display: none;">
-        <input type="text" id="searchInput" placeholder="동네 이름 입력 (예: 사직동)">
-        <button id="searchBtn">검색</button>
+        <div class="search-wrap">
+            <input type="text" id="searchInput" placeholder="동네 이름 입력 (예: 사직동, 연남동)">
+            <button id="searchBtn">검색</button>
+        </div>
         <ul id="suggestions"></ul>
     </div>
 
     <div id="result">
-        <h2 id="res-name"></h2>
-        <p><strong>총 인구수:</strong> <span id="res-total"></span>명</p>
-        <p><strong>남성 인구수:</strong> <span id="res-male"></span>명</p>
-        <p><strong>여성 인구수:</strong> <span id="res-female"></span>명</p>
+        <h2 id="res-name" style="text-align: center; margin-top: 0;"></h2>
+        <div class="summary-info">
+            <p><strong>총 인구:</strong> <span id="res-total"></span>명</p>
+            <p style="color: #007BFF;"><strong>남성:</strong> <span id="res-male"></span>명</p>
+            <p style="color: #FF4136;"><strong>여성:</strong> <span id="res-female"></span>명</p>
+        </div>
+        <!-- 인구 피라미드가 그려질 영역 -->
+        <div id="pyramid-chart"></div>
     </div>
 
     <script>
         const CSV_URL = 'https://raw.githubusercontent.com/greatsong/modudata/main/data/population_latest.csv';
         let populationData = [];
+        let ageLabels = [];
 
         // 큰따옴표 안의 쉼표를 무시하며 CSV를 파싱하는 함수
         function parseCSV(text) {
@@ -80,15 +94,28 @@
 
                 const header = rows[0];
                 let colRegion = -1, colTotal = -1, colMale = -1, colFemale = -1;
+                let maleCols = [];
+                let femaleCols = [];
 
-                // 년/월에 상관없이 동적으로 열 인덱스 찾기
+                // 열 인덱스 동적 추출
                 for (let i = 0; i < header.length; i++) {
-                    if (header[i].includes('행정구역')) colRegion = i;
-                    // "_총인구수"로 끝나고 성별 조건이 없는 열이 전체 총인구수
-                    else if (header[i].includes('_총인구수') && !header[i].includes('_남_') && !header[i].includes('_여_')) colTotal = i;
-                    else if (header[i].includes('_남_총인구수')) colMale = i;
-                    else if (header[i].includes('_여_총인구수')) colFemale = i;
+                    const h = header[i];
+                    if (h.includes('행정구역')) colRegion = i;
+                    else if (h.includes('_총인구수') && !h.includes('_남_') && !h.includes('_여_')) colTotal = i;
+                    else if (h.includes('_남_총인구수')) colMale = i;
+                    else if (h.includes('_여_총인구수')) colFemale = i;
+                    
+                    // 연령별 인구수 열 추출 (총인구, 연령구간 제외하고 '세'가 포함된 열)
+                    if (h.includes('_남_') && h.includes('세') && !h.includes('연령구간') && !h.includes('총인구')) {
+                        maleCols.push(i);
+                    }
+                    if (h.includes('_여_') && h.includes('세') && !h.includes('연령구간') && !h.includes('총인구')) {
+                        femaleCols.push(i);
+                    }
                 }
+
+                // Y축 연령 라벨 추출 (예: "2026년09월_남_5세" -> "5세")
+                ageLabels = maleCols.map(i => header[i].split('_').pop());
 
                 populationData = rows.slice(1).map(row => {
                     if (!row[colRegion]) return null;
@@ -97,11 +124,18 @@
                     const regionRaw = row[colRegion];
                     const regionClean = regionRaw.replace(/\([^)]*\)/g, '').trim();
 
+                    // 각 연령별 인구수를 숫자로 변환
+                    const parseNum = (val) => parseInt((val || '0').replace(/,/g, ''), 10);
+                    const maleAges = maleCols.map(i => parseNum(row[i]));
+                    const femaleAges = femaleCols.map(i => parseNum(row[i]));
+
                     return {
                         name: regionClean,
                         total: row[colTotal] || '0',
                         male: row[colMale] || '0',
-                        female: row[colFemale] || '0'
+                        female: row[colFemale] || '0',
+                        maleAges: maleAges,
+                        femaleAges: femaleAges
                     };
                 }).filter(item => item !== null);
 
@@ -109,4 +143,123 @@
                 document.getElementById('search-container').style.display = 'block';
 
             } catch (error) {
-                document.getElementById('status').textContent = '데이터를
+                document.getElementById('status').textContent = '데이터를 불러오는 데 실패했습니다.';
+                console.error(error);
+            }
+        }
+
+        function searchData() {
+            const keyword = document.getElementById('searchInput').value.trim();
+            const suggestionsBox = document.getElementById('suggestions');
+            suggestionsBox.innerHTML = '';
+            document.getElementById('result').style.display = 'none';
+
+            if (!keyword) return;
+
+            // 검색어가 포함된 지역명 필터링 (최대 10개 표시)
+            const results = populationData.filter(item => item.name.includes(keyword)).slice(0, 10);
+            
+            if (results.length === 0) {
+                const li = document.createElement('li');
+                li.textContent = '검색 결과가 없습니다.';
+                suggestionsBox.appendChild(li);
+                return;
+            }
+
+            results.forEach(item => {
+                const li = document.createElement('li');
+                li.textContent = item.name;
+                li.onclick = () => showResult(item);
+                suggestionsBox.appendChild(li);
+            });
+        }
+
+        function drawPyramid(item) {
+            // 남성은 음수로 만들어 왼쪽으로 향하게 구성
+            const traceMale = {
+                x: item.maleAges.map(v => -v),
+                y: ageLabels,
+                name: '남성',
+                type: 'bar',
+                orientation: 'h',
+                marker: { color: '#007BFF' },
+                hoverinfo: 'text',
+                // 마우스 오버 시에는 음수 부호를 뗀 원래 값 표시
+                text: item.maleAges.map((v, i) => `${ageLabels[i]} 남성: ${v.toLocaleString()}명`)
+            };
+
+            const traceFemale = {
+                x: item.femaleAges,
+                y: ageLabels,
+                name: '여성',
+                type: 'bar',
+                orientation: 'h',
+                marker: { color: '#FF4136' },
+                hoverinfo: 'text',
+                text: item.femaleAges.map((v, i) => `${ageLabels[i]} 여성: ${v.toLocaleString()}명`)
+            };
+
+            // 차트 X축 눈금을 깔끔하게 생성하기 위한 로직 (음수 라벨을 양수로 보이게 함)
+            const maxVal = Math.max(...item.femaleAges, ...item.maleAges);
+            const step = Math.pow(10, Math.max(0, Math.floor(Math.log10(maxVal || 1))));
+            let tickStep = step;
+            if (maxVal / tickStep < 2) tickStep /= 5;
+            else if (maxVal / tickStep < 5) tickStep /= 2;
+
+            const tickvals = [];
+            const ticktext = [];
+            for (let v = 0; v <= maxVal; v += tickStep) {
+                if (v === 0) {
+                    tickvals.push(0); ticktext.push('0');
+                } else {
+                    tickvals.push(v, -v);
+                    ticktext.push(v.toLocaleString(), v.toLocaleString());
+                }
+            }
+
+            const layout = {
+                title: false, // 상단 레이블과 중복되므로 제외
+                barmode: 'relative', // 양/음수를 사용한 피라미드 모드
+                margin: { l: 80, r: 20, t: 30, b: 40 },
+                xaxis: {
+                    title: '인구수 (명)',
+                    tickmode: 'array',
+                    tickvals: tickvals,
+                    ticktext: ticktext,
+                    zeroline: true,
+                    zerolinecolor: '#ccc',
+                },
+                yaxis: {
+                    title: '연령',
+                    autorange: true,
+                    tickfont: { size: 10 }
+                },
+                legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.05 }
+            };
+
+            Plotly.newPlot('pyramid-chart', [traceMale, traceFemale], layout, { displayModeBar: false, responsive: true });
+        }
+
+        function showResult(item) {
+            document.getElementById('suggestions').innerHTML = ''; // 검색창 닫기
+            document.getElementById('res-name').textContent = item.name;
+            document.getElementById('res-total').textContent = item.total;
+            document.getElementById('res-male').textContent = item.male;
+            document.getElementById('res-female').textContent = item.female;
+            
+            document.getElementById('result').style.display = 'block';
+
+            // 그래프 그리기
+            drawPyramid(item);
+        }
+
+        document.getElementById('searchBtn').addEventListener('click', searchData);
+        document.getElementById('searchInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') searchData();
+        });
+
+        // 앱 시작 시 데이터 로드
+        loadData();
+    </script>
+</body>
+</html>
